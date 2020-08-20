@@ -1,0 +1,1407 @@
+{
+	"name": "File_HyperScale_Loader",
+	"properties": {
+		"activities": [
+			{
+				"name": "LoopFlowID",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "LookupMetadataGroupId",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@activity('LookupMetadataGroupId').output.value",
+						"type": "Expression"
+					},
+					"batchCount": 5,
+					"activities": [
+						{
+							"name": "SqlWriteMode",
+							"type": "Switch",
+							"dependsOn": [
+								{
+									"activity": "Start Of Step",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"userProperties": [],
+							"typeProperties": {
+								"on": {
+									"value": "@toLower(item().TGT_LOAD_OPTIONS)",
+									"type": "Expression"
+								},
+								"cases": [
+									{
+										"value": "upsert",
+										"activities": [
+											{
+												"name": "SFTPtoTempBlob",
+												"type": "Copy",
+												"dependsOn": [],
+												"policy": {
+													"timeout": "7.00:00:00",
+													"retry": 0,
+													"retryIntervalInSeconds": 30,
+													"secureOutput": false,
+													"secureInput": false
+												},
+												"userProperties": [],
+												"typeProperties": {
+													"source": {
+														"type": "DelimitedTextSource",
+														"storeSettings": {
+															"type": "SftpReadSettings",
+															"recursive": true
+														},
+														"formatSettings": {
+															"type": "DelimitedTextReadSettings"
+														}
+													},
+													"sink": {
+														"type": "ParquetSink",
+														"storeSettings": {
+															"type": "AzureBlobStorageWriteSettings"
+														}
+													},
+													"enableStaging": false,
+													"translator": {
+														"value": "@json(item().MAPPING_EXPRESSION)",
+														"type": "Expression"
+													}
+												},
+												"inputs": [
+													{
+														"referenceName": "CsvDataset",
+														"type": "DatasetReference",
+														"parameters": {
+															"host": {
+																"value": "@item().FILE_HOST_NAME",
+																"type": "Expression"
+															},
+															"user": {
+																"value": "@item().FILE_USERNAME",
+																"type": "Expression"
+															},
+															"pass": {
+																"value": "@item().FILE_PASSWORD",
+																"type": "Expression"
+															},
+															"path": {
+																"value": "@item().SRC_ROOT_DIR",
+																"type": "Expression"
+															},
+															"filename": {
+																"value": "@item().OBJECT_NAME",
+																"type": "Expression"
+															},
+															"isHeader": {
+																"value": "@item().HEADER_FLAG",
+																"type": "Expression"
+															}
+														}
+													}
+												],
+												"outputs": [
+													{
+														"referenceName": "TempBlob",
+														"type": "DatasetReference",
+														"parameters": {
+															"table": "@item().TGT_TABLE_NAME"
+														}
+													}
+												]
+											},
+											{
+												"name": "FileToHyperscale",
+												"type": "ExecuteDataFlow",
+												"dependsOn": [
+													{
+														"activity": "SFTPtoTempBlob",
+														"dependencyConditions": [
+															"Succeeded"
+														]
+													}
+												],
+												"policy": {
+													"timeout": "7.00:00:00",
+													"retry": 0,
+													"retryIntervalInSeconds": 30,
+													"secureOutput": false,
+													"secureInput": false
+												},
+												"userProperties": [],
+												"typeProperties": {
+													"dataflow": {
+														"referenceName": "ExcelToHyperscale",
+														"type": "DataFlowReference",
+														"parameters": {
+															"table": {
+																"value": "'@{item().TGT_TABLE_NAME}'",
+																"type": "Expression"
+															},
+															"primarykeys": {
+																"value": "'@{item().TGT_PRIMARY_KEY}'",
+																"type": "Expression"
+															}
+														},
+														"datasetParameters": {
+															"TempParquet": {
+																"table": "@item().TGT_TABLE_NAME"
+															},
+															"UpsertRDBMS": {
+																"host": "@item().SQL_HOST_NAME",
+																"db": "@item().SQL_DB_NAME",
+																"username": "@item().SQL_USERNAME",
+																"password": "@item().SQL_PASSWORD",
+																"schema": "@item().TGT_SCHEMA_NAME",
+																"table": "@item().TGT_TABLE_NAME",
+																"primarykeys": "@item().TGT_PRIMARY_KEY"
+															}
+														}
+													},
+													"compute": {
+														"coreCount": 8,
+														"computeType": "General"
+													}
+												}
+											},
+											{
+												"name": "Failure Of Step Upsert",
+												"type": "SqlServerStoredProcedure",
+												"dependsOn": [
+													{
+														"activity": "SFTPtoTempBlob",
+														"dependencyConditions": [
+															"Failed"
+														]
+													}
+												],
+												"policy": {
+													"timeout": "7.00:00:00",
+													"retry": 0,
+													"retryIntervalInSeconds": 30,
+													"secureOutput": false,
+													"secureInput": false
+												},
+												"userProperties": [],
+												"typeProperties": {
+													"storedProcedureName": "[dbo].[DATA_PROCESSING_EXEC_LOG_SP]",
+													"storedProcedureParameters": {
+														"DP_STEP_STATUS": {
+															"value": "FAILED",
+															"type": "String"
+														},
+														"ERROR_MESSAGE": {
+															"value": {
+																"value": "@activity('SFTPtoTempBlob').Error.Message",
+																"type": "Expression"
+															},
+															"type": "String"
+														},
+														"EXEC_INSTANCE_ID": {
+															"value": {
+																"value": "@variables('InstanceID')",
+																"type": "Expression"
+															},
+															"type": "Int32"
+														},
+														"GROUP_ID": {
+															"value": {
+																"value": "@pipeline().parameters.groupID",
+																"type": "Expression"
+															},
+															"type": "Int32"
+														},
+														"OBJECT_ID": {
+															"value": {
+																"value": "@item().OBJECT_ID",
+																"type": "Expression"
+															},
+															"type": "Int32"
+														},
+														"OBJECT_NAME": {
+															"value": {
+																"value": "@item().OBJECT_NAME",
+																"type": "Expression"
+															},
+															"type": "String"
+														},
+														"SRC_REC_COUNT": {
+															"value": "NA",
+															"type": "String"
+														},
+														"StatementType": {
+															"value": "UpdateFailure",
+															"type": "String"
+														},
+														"TGT_REC_COUNT": {
+															"value": "NA",
+															"type": "String"
+														}
+													}
+												},
+												"linkedServiceName": {
+													"referenceName": "SQLServerMetadataDB",
+													"type": "LinkedServiceReference"
+												}
+											},
+											{
+												"name": "Failure Of Step Data Flow",
+												"type": "SqlServerStoredProcedure",
+												"dependsOn": [
+													{
+														"activity": "FileToHyperscale",
+														"dependencyConditions": [
+															"Failed"
+														]
+													}
+												],
+												"policy": {
+													"timeout": "7.00:00:00",
+													"retry": 0,
+													"retryIntervalInSeconds": 30,
+													"secureOutput": false,
+													"secureInput": false
+												},
+												"userProperties": [],
+												"typeProperties": {
+													"storedProcedureName": "[dbo].[DATA_PROCESSING_EXEC_LOG_SP]",
+													"storedProcedureParameters": {
+														"DP_STEP_STATUS": {
+															"value": "FAILED",
+															"type": "String"
+														},
+														"ERROR_MESSAGE": {
+															"value": {
+																"value": "@activity('FileToHyperscale').Error.Message",
+																"type": "Expression"
+															},
+															"type": "String"
+														},
+														"EXEC_INSTANCE_ID": {
+															"value": {
+																"value": "@variables('InstanceID')",
+																"type": "Expression"
+															},
+															"type": "Int32"
+														},
+														"GROUP_ID": {
+															"value": {
+																"value": "@pipeline().parameters.groupID",
+																"type": "Expression"
+															},
+															"type": "Int32"
+														},
+														"OBJECT_ID": {
+															"value": {
+																"value": "@item().OBJECT_ID",
+																"type": "Expression"
+															},
+															"type": "Int32"
+														},
+														"OBJECT_NAME": {
+															"value": {
+																"value": "@item().OBJECT_NAME",
+																"type": "Expression"
+															},
+															"type": "String"
+														},
+														"SRC_REC_COUNT": {
+															"value": "NA",
+															"type": "String"
+														},
+														"StatementType": {
+															"value": "UpdateFailure",
+															"type": "String"
+														},
+														"TGT_REC_COUNT": {
+															"value": "NA",
+															"type": "String"
+														}
+													}
+												},
+												"linkedServiceName": {
+													"referenceName": "SQLServerMetadataDB",
+													"type": "LinkedServiceReference"
+												}
+											},
+											{
+												"name": "Success Of Step Data Flow",
+												"type": "SqlServerStoredProcedure",
+												"dependsOn": [
+													{
+														"activity": "FileToHyperscale",
+														"dependencyConditions": [
+															"Succeeded"
+														]
+													}
+												],
+												"policy": {
+													"timeout": "7.00:00:00",
+													"retry": 0,
+													"retryIntervalInSeconds": 30,
+													"secureOutput": false,
+													"secureInput": false
+												},
+												"userProperties": [],
+												"typeProperties": {
+													"storedProcedureName": "[dbo].[DATA_PROCESSING_EXEC_LOG_SP]",
+													"storedProcedureParameters": {
+														"DP_STEP_STATUS": {
+															"value": "SUCCESS",
+															"type": "String"
+														},
+														"ERROR_MESSAGE": {
+															"value": null,
+															"type": "String"
+														},
+														"EXEC_INSTANCE_ID": {
+															"value": {
+																"value": "@variables('InstanceID')",
+																"type": "Expression"
+															},
+															"type": "Int32"
+														},
+														"GROUP_ID": {
+															"value": {
+																"value": "@pipeline().parameters.groupID",
+																"type": "Expression"
+															},
+															"type": "Int32"
+														},
+														"OBJECT_ID": {
+															"value": {
+																"value": "@item().OBJECT_ID",
+																"type": "Expression"
+															},
+															"type": "Int32"
+														},
+														"OBJECT_NAME": {
+															"value": {
+																"value": "@item().OBJECT_NAME",
+																"type": "Expression"
+															},
+															"type": "String"
+														},
+														"SRC_REC_COUNT": {
+															"value": null,
+															"type": "String"
+														},
+														"StatementType": {
+															"value": "UpdateSuccess",
+															"type": "String"
+														},
+														"TGT_REC_COUNT": {
+															"value": null,
+															"type": "String"
+														}
+													}
+												},
+												"linkedServiceName": {
+													"referenceName": "SQLServerMetadataDB",
+													"type": "LinkedServiceReference"
+												}
+											}
+										]
+									},
+									{
+										"value": "append",
+										"activities": [
+											{
+												"name": "FileToHyperscaleAppend",
+												"type": "Copy",
+												"dependsOn": [],
+												"policy": {
+													"timeout": "7.00:00:00",
+													"retry": 0,
+													"retryIntervalInSeconds": 30,
+													"secureOutput": false,
+													"secureInput": false
+												},
+												"userProperties": [],
+												"typeProperties": {
+													"source": {
+														"type": "DelimitedTextSource",
+														"storeSettings": {
+															"type": "SftpReadSettings",
+															"recursive": true
+														},
+														"formatSettings": {
+															"type": "DelimitedTextReadSettings"
+														}
+													},
+													"sink": {
+														"type": "AzureSqlSink"
+													},
+													"enableStaging": false,
+													"translator": {
+														"value": "@json(item().MAPPING_EXPRESSION)",
+														"type": "Expression"
+													}
+												},
+												"inputs": [
+													{
+														"referenceName": "CsvDataset",
+														"type": "DatasetReference",
+														"parameters": {
+															"host": {
+																"value": "@item().FILE_HOST_NAME",
+																"type": "Expression"
+															},
+															"user": {
+																"value": "@item().FILE_USERNAME",
+																"type": "Expression"
+															},
+															"pass": {
+																"value": "@item().FILE_PASSWORD",
+																"type": "Expression"
+															},
+															"path": {
+																"value": "@item().SRC_ROOT_DIR",
+																"type": "Expression"
+															},
+															"filename": {
+																"value": "@item().OBJECT_NAME",
+																"type": "Expression"
+															},
+															"isHeader": {
+																"value": "@item().HEADER_FLAG",
+																"type": "Expression"
+															}
+														}
+													}
+												],
+												"outputs": [
+													{
+														"referenceName": "AzureHyperscale",
+														"type": "DatasetReference",
+														"parameters": {
+															"host": "@item().SQL_HOST_NAME",
+															"db": "@item().SQL_DB_NAME",
+															"username": "@item().SQL_USERNAME",
+															"password": "@item().SQL_PASSWORD",
+															"schema": "@item().TGT_SCHEMA_NAME",
+															"table": "@item().TGT_TABLE_NAME",
+															"primarykeys": "@item().TGT_PRIMARY_KEY"
+														}
+													}
+												]
+											},
+											{
+												"name": "Update Audit Table Append",
+												"type": "SqlServerStoredProcedure",
+												"dependsOn": [
+													{
+														"activity": "FileToHyperscaleAppend",
+														"dependencyConditions": [
+															"Succeeded"
+														]
+													}
+												],
+												"policy": {
+													"timeout": "7.00:00:00",
+													"retry": 0,
+													"retryIntervalInSeconds": 30,
+													"secureOutput": false,
+													"secureInput": false
+												},
+												"userProperties": [],
+												"typeProperties": {
+													"storedProcedureName": "[dbo].[DATA_PROCESSING_EXEC_LOG_SP]",
+													"storedProcedureParameters": {
+														"DP_STEP_STATUS": {
+															"value": null,
+															"type": "String"
+														},
+														"ERROR_MESSAGE": {
+															"value": null,
+															"type": "String"
+														},
+														"EXEC_INSTANCE_ID": {
+															"value": {
+																"value": "@variables('InstanceID')",
+																"type": "Expression"
+															},
+															"type": "Int32"
+														},
+														"GROUP_ID": {
+															"value": {
+																"value": "@pipeline().parameters.groupID",
+																"type": "Expression"
+															},
+															"type": "Int32"
+														},
+														"OBJECT_ID": {
+															"value": {
+																"value": "@item().OBJECT_ID",
+																"type": "Expression"
+															},
+															"type": "Int32"
+														},
+														"OBJECT_NAME": {
+															"value": {
+																"value": "@item().OBJECT_NAME",
+																"type": "Expression"
+															},
+															"type": "String"
+														},
+														"SRC_REC_COUNT": {
+															"value": {
+																"value": "@activity('FileToHyperscaleAppend').output.rowsRead",
+																"type": "Expression"
+															},
+															"type": "String"
+														},
+														"StatementType": {
+															"value": "UpdateCount",
+															"type": "String"
+														},
+														"TGT_REC_COUNT": {
+															"value": {
+																"value": "@activity('FileToHyperscaleAppend').output.rowsCopied",
+																"type": "Expression"
+															},
+															"type": "String"
+														}
+													}
+												},
+												"linkedServiceName": {
+													"referenceName": "SQLServerMetadataDB",
+													"type": "LinkedServiceReference"
+												}
+											},
+											{
+												"name": "Failure Of Step Append",
+												"type": "SqlServerStoredProcedure",
+												"dependsOn": [
+													{
+														"activity": "FileToHyperscaleAppend",
+														"dependencyConditions": [
+															"Failed"
+														]
+													}
+												],
+												"policy": {
+													"timeout": "7.00:00:00",
+													"retry": 0,
+													"retryIntervalInSeconds": 30,
+													"secureOutput": false,
+													"secureInput": false
+												},
+												"userProperties": [],
+												"typeProperties": {
+													"storedProcedureName": "[dbo].[DATA_PROCESSING_EXEC_LOG_SP]",
+													"storedProcedureParameters": {
+														"DP_STEP_STATUS": {
+															"value": "FAILED",
+															"type": "String"
+														},
+														"ERROR_MESSAGE": {
+															"value": {
+																"value": "@activity('FileToHyperscaleAppend').Error.Message",
+																"type": "Expression"
+															},
+															"type": "String"
+														},
+														"EXEC_INSTANCE_ID": {
+															"value": {
+																"value": "@variables('InstanceID')",
+																"type": "Expression"
+															},
+															"type": "Int32"
+														},
+														"GROUP_ID": {
+															"value": {
+																"value": "@pipeline().parameters.groupID",
+																"type": "Expression"
+															},
+															"type": "Int32"
+														},
+														"OBJECT_ID": {
+															"value": {
+																"value": "@item().OBJECT_ID",
+																"type": "Expression"
+															},
+															"type": "Int32"
+														},
+														"OBJECT_NAME": {
+															"value": {
+																"value": "@item().OBJECT_NAME",
+																"type": "Expression"
+															},
+															"type": "String"
+														},
+														"SRC_REC_COUNT": {
+															"value": "NA",
+															"type": "String"
+														},
+														"StatementType": {
+															"value": "UpdateFailure",
+															"type": "String"
+														},
+														"TGT_REC_COUNT": {
+															"value": "NA",
+															"type": "String"
+														}
+													}
+												},
+												"linkedServiceName": {
+													"referenceName": "SQLServerMetadataDB",
+													"type": "LinkedServiceReference"
+												}
+											}
+										]
+									},
+									{
+										"value": "overwrite",
+										"activities": [
+											{
+												"name": "FileToHyperscaleOverwrite",
+												"type": "Copy",
+												"dependsOn": [],
+												"policy": {
+													"timeout": "7.00:00:00",
+													"retry": 0,
+													"retryIntervalInSeconds": 30,
+													"secureOutput": false,
+													"secureInput": false
+												},
+												"userProperties": [],
+												"typeProperties": {
+													"source": {
+														"type": "DelimitedTextSource",
+														"storeSettings": {
+															"type": "SftpReadSettings",
+															"recursive": true
+														},
+														"formatSettings": {
+															"type": "DelimitedTextReadSettings"
+														}
+													},
+													"sink": {
+														"type": "AzureSqlSink",
+														"preCopyScript": {
+															"value": "@{concat('TRUNCATE TABLE ',concat(item().TGT_SCHEMA_NAME,'.',item().TGT_TABLE_NAME))}",
+															"type": "Expression"
+														},
+														"tableOption": "autoCreate",
+														"disableMetricsCollection": false
+													},
+													"enableStaging": false,
+													"translator": {
+														"value": "@json(item().MAPPING_EXPRESSION)",
+														"type": "Expression"
+													}
+												},
+												"inputs": [
+													{
+														"referenceName": "CsvDataset",
+														"type": "DatasetReference",
+														"parameters": {
+															"host": {
+																"value": "@item().FILE_HOST_NAME",
+																"type": "Expression"
+															},
+															"user": {
+																"value": "@item().FILE_USERNAME",
+																"type": "Expression"
+															},
+															"pass": {
+																"value": "@item().FILE_PASSWORD",
+																"type": "Expression"
+															},
+															"path": {
+																"value": "@item().SRC_ROOT_DIR",
+																"type": "Expression"
+															},
+															"filename": {
+																"value": "@item().OBJECT_NAME",
+																"type": "Expression"
+															},
+															"isHeader": {
+																"value": "@item().HEADER_FLAG",
+																"type": "Expression"
+															}
+														}
+													}
+												],
+												"outputs": [
+													{
+														"referenceName": "AzureHyperscale",
+														"type": "DatasetReference",
+														"parameters": {
+															"host": "@item().SQL_HOST_NAME",
+															"db": "@item().SQL_DB_NAME",
+															"username": "@item().SQL_USERNAME",
+															"password": "@item().SQL_PASSWORD",
+															"schema": "@item().TGT_SCHEMA_NAME",
+															"table": "@item().TGT_TABLE_NAME",
+															"primarykeys": "@item().TGT_PRIMARY_KEY"
+														}
+													}
+												]
+											},
+											{
+												"name": "Update Audit Table Overwrite",
+												"type": "SqlServerStoredProcedure",
+												"dependsOn": [
+													{
+														"activity": "FileToHyperscaleOverwrite",
+														"dependencyConditions": [
+															"Succeeded"
+														]
+													}
+												],
+												"policy": {
+													"timeout": "7.00:00:00",
+													"retry": 0,
+													"retryIntervalInSeconds": 30,
+													"secureOutput": false,
+													"secureInput": false
+												},
+												"userProperties": [],
+												"typeProperties": {
+													"storedProcedureName": "[dbo].[DATA_PROCESSING_EXEC_LOG_SP]",
+													"storedProcedureParameters": {
+														"DP_STEP_STATUS": {
+															"value": null,
+															"type": "String"
+														},
+														"ERROR_MESSAGE": {
+															"value": null,
+															"type": "String"
+														},
+														"EXEC_INSTANCE_ID": {
+															"value": {
+																"value": "@variables('InstanceID')",
+																"type": "Expression"
+															},
+															"type": "Int32"
+														},
+														"GROUP_ID": {
+															"value": {
+																"value": "@pipeline().parameters.groupID",
+																"type": "Expression"
+															},
+															"type": "Int32"
+														},
+														"OBJECT_ID": {
+															"value": {
+																"value": "@item().OBJECT_ID",
+																"type": "Expression"
+															},
+															"type": "Int32"
+														},
+														"OBJECT_NAME": {
+															"value": {
+																"value": "@item().OBJECT_NAME",
+																"type": "Expression"
+															},
+															"type": "String"
+														},
+														"SRC_REC_COUNT": {
+															"value": {
+																"value": "@activity('FileToHyperscaleOverwrite').output.rowsRead",
+																"type": "Expression"
+															},
+															"type": "String"
+														},
+														"StatementType": {
+															"value": "UpdateCount",
+															"type": "String"
+														},
+														"TGT_REC_COUNT": {
+															"value": {
+																"value": "@activity('FileToHyperscaleOverwrite').output.rowsCopied",
+																"type": "Expression"
+															},
+															"type": "String"
+														}
+													}
+												},
+												"linkedServiceName": {
+													"referenceName": "SQLServerMetadataDB",
+													"type": "LinkedServiceReference"
+												}
+											},
+											{
+												"name": "Failure Of Step Overwrite",
+												"type": "SqlServerStoredProcedure",
+												"dependsOn": [
+													{
+														"activity": "FileToHyperscaleOverwrite",
+														"dependencyConditions": [
+															"Failed"
+														]
+													}
+												],
+												"policy": {
+													"timeout": "7.00:00:00",
+													"retry": 0,
+													"retryIntervalInSeconds": 30,
+													"secureOutput": false,
+													"secureInput": false
+												},
+												"userProperties": [],
+												"typeProperties": {
+													"storedProcedureName": "[dbo].[DATA_PROCESSING_EXEC_LOG_SP]",
+													"storedProcedureParameters": {
+														"DP_STEP_STATUS": {
+															"value": "FAILED",
+															"type": "String"
+														},
+														"ERROR_MESSAGE": {
+															"value": {
+																"value": "@activity('FileToHyperscaleOverwrite').Error.Message",
+																"type": "Expression"
+															},
+															"type": "String"
+														},
+														"EXEC_INSTANCE_ID": {
+															"value": {
+																"value": "@variables('InstanceID')",
+																"type": "Expression"
+															},
+															"type": "Int32"
+														},
+														"GROUP_ID": {
+															"value": {
+																"value": "@pipeline().parameters.groupID",
+																"type": "Expression"
+															},
+															"type": "Int32"
+														},
+														"OBJECT_ID": {
+															"value": {
+																"value": "@item().OBJECT_ID",
+																"type": "Expression"
+															},
+															"type": "Int32"
+														},
+														"OBJECT_NAME": {
+															"value": {
+																"value": "@item().OBJECT_NAME",
+																"type": "Expression"
+															},
+															"type": "String"
+														},
+														"SRC_REC_COUNT": {
+															"value": "NA",
+															"type": "String"
+														},
+														"StatementType": {
+															"value": "UpdateFailure",
+															"type": "String"
+														},
+														"TGT_REC_COUNT": {
+															"value": "NA",
+															"type": "String"
+														}
+													}
+												},
+												"linkedServiceName": {
+													"referenceName": "SQLServerMetadataDB",
+													"type": "LinkedServiceReference"
+												}
+											}
+										]
+									}
+								]
+							}
+						},
+						{
+							"name": "Start Of Step",
+							"type": "SqlServerStoredProcedure",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"storedProcedureName": "[dbo].[DATA_PROCESSING_EXEC_LOG_SP]",
+								"storedProcedureParameters": {
+									"DP_STEP_STATUS": {
+										"value": "RUNNING",
+										"type": "String"
+									},
+									"ERROR_MESSAGE": {
+										"value": null,
+										"type": "String"
+									},
+									"EXEC_INSTANCE_ID": {
+										"value": {
+											"value": "@variables('InstanceID')",
+											"type": "Expression"
+										},
+										"type": "Int32"
+									},
+									"GROUP_ID": {
+										"value": {
+											"value": "@pipeline().parameters.groupID",
+											"type": "Expression"
+										},
+										"type": "Int32"
+									},
+									"OBJECT_ID": {
+										"value": {
+											"value": "@item().OBJECT_ID",
+											"type": "Expression"
+										},
+										"type": "Int32"
+									},
+									"OBJECT_NAME": {
+										"value": {
+											"value": "@item().OBJECT_NAME",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"SRC_REC_COUNT": {
+										"value": "NA",
+										"type": "String"
+									},
+									"StatementType": {
+										"value": "Insert",
+										"type": "String"
+									},
+									"TGT_REC_COUNT": {
+										"value": "NA",
+										"type": "String"
+									}
+								}
+							},
+							"linkedServiceName": {
+								"referenceName": "SQLServerMetadataDB",
+								"type": "LinkedServiceReference"
+							}
+						},
+						{
+							"name": "Success Of Step",
+							"type": "SqlServerStoredProcedure",
+							"dependsOn": [
+								{
+									"activity": "SqlWriteMode",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"storedProcedureName": "[dbo].[DATA_PROCESSING_EXEC_LOG_SP]",
+								"storedProcedureParameters": {
+									"DP_STEP_STATUS": {
+										"value": "SUCCESS",
+										"type": "String"
+									},
+									"ERROR_MESSAGE": {
+										"value": null,
+										"type": "String"
+									},
+									"EXEC_INSTANCE_ID": {
+										"value": {
+											"value": "@variables('InstanceID')",
+											"type": "Expression"
+										},
+										"type": "Int32"
+									},
+									"GROUP_ID": {
+										"value": {
+											"value": "@pipeline().parameters.groupID",
+											"type": "Expression"
+										},
+										"type": "Int32"
+									},
+									"OBJECT_ID": {
+										"value": {
+											"value": "@item().OBJECT_ID",
+											"type": "Expression"
+										},
+										"type": "Int32"
+									},
+									"OBJECT_NAME": {
+										"value": {
+											"value": "@item().OBJECT_NAME",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"SRC_REC_COUNT": {
+										"value": null,
+										"type": "String"
+									},
+									"StatementType": {
+										"value": "UpdateSuccess",
+										"type": "String"
+									},
+									"TGT_REC_COUNT": {
+										"value": null,
+										"type": "String"
+									}
+								}
+							},
+							"linkedServiceName": {
+								"referenceName": "SQLServerMetadataDB",
+								"type": "LinkedServiceReference"
+							}
+						},
+						{
+							"name": "Failure Of Step",
+							"type": "SqlServerStoredProcedure",
+							"dependsOn": [
+								{
+									"activity": "SqlWriteMode",
+									"dependencyConditions": [
+										"Failed"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"storedProcedureName": "[dbo].[DATA_PROCESSING_EXEC_LOG_SP]",
+								"storedProcedureParameters": {
+									"DP_STEP_STATUS": {
+										"value": {
+											"value": "FAILED",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"ERROR_MESSAGE": {
+										"value": null,
+										"type": "String"
+									},
+									"EXEC_INSTANCE_ID": {
+										"value": {
+											"value": "@variables('InstanceID')",
+											"type": "Expression"
+										},
+										"type": "Int32"
+									},
+									"GROUP_ID": {
+										"value": {
+											"value": "@pipeline().parameters.groupID",
+											"type": "Expression"
+										},
+										"type": "Int32"
+									},
+									"OBJECT_ID": {
+										"value": {
+											"value": "@item().OBJECT_ID",
+											"type": "Expression"
+										},
+										"type": "Int32"
+									},
+									"OBJECT_NAME": {
+										"value": {
+											"value": "@item().OBJECT_NAME",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"SRC_REC_COUNT": {
+										"value": null,
+										"type": "String"
+									},
+									"StatementType": {
+										"value": "UpdateSuccess",
+										"type": "String"
+									},
+									"TGT_REC_COUNT": {
+										"value": null,
+										"type": "String"
+									}
+								}
+							},
+							"linkedServiceName": {
+								"referenceName": "SQLServerMetadataDB",
+								"type": "LinkedServiceReference"
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "LookupMetadataGroupId",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "Set InstanceID",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "SELECT FLOW_ID,GROUP_ID,OBJECT_ID,OBJECT_NAME,SRC_ROOT_DIR,SRC_FORMAT,SRC_SCHEMA,SRC_SHEET_NAME,SRC_FILE_DELIMITER,SRC_COMPRESSION,SRC_TRANSFER_MODE,HEADER_FLAG,TGT_CONNECTION_ID,TGT_SCHEMA_NAME,TGT_TABLE_NAME,TGT_COLUMN_NAMES,TGT_FORMAT,TGT_DATA_TYPE,TGT_LOAD_OPTIONS,MAPPING_EXPRESSION,TGT_PRIMARY_KEY,s.HOST_NAME as FILE_HOST_NAME,s.PORT_NUMBER AS FILE_PORT_NUMBER,s.USERNAME as FILE_USERNAME,s.PASSWORD as FILE_PASSWORD,t.DB_NAME as SQL_DB_NAME,t.SYSTEM_ID as SQL_SCHEMA,t.HOST_NAME  as SQL_HOST_NAME,t.PORT_NUMBER as SQL_PORT_NUMBER,t.USERNAME as SQL_USERNAME,t.PASSWORD as SQL_PASSWORD FROM dbo.FILE_INGESTION_DETAILS f left join dbo.FILE_CONNECTION_DETAILS s on f.src_connection_id=s.connection_id left join dbo.RDBMS_CONNECTION_DETAILS t on f.tgt_connection_id=t.connection_id   where group_id=@{pipeline().parameters.groupID}",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "SQLServerMetadataDataset",
+						"type": "DatasetReference"
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "Get InstanceID",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "Start Execution",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "SELECT MAX(EXEC_INSTANCE_ID) AS InstanceID FROM dbo.DATA_FLOW_EXEC_LOG WHERE FLOW_ID= '@{pipeline().parameters.FLOW_ID}' AND EXEC_STATUS='RUNNING'",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "AuditAndExecutionLogDataset",
+						"type": "DatasetReference",
+						"parameters": {
+							"MetadataTableName": "DATA_FLOW_EXEC_LOG "
+						}
+					}
+				}
+			},
+			{
+				"name": "Set InstanceID",
+				"type": "SetVariable",
+				"dependsOn": [
+					{
+						"activity": "Get InstanceID",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"variableName": "InstanceID",
+					"value": {
+						"value": "@string(activity('Get InstanceID').output.firstRow.InstanceID)",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "Success Of Flow",
+				"type": "SqlServerStoredProcedure",
+				"dependsOn": [
+					{
+						"activity": "LoopFlowID",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"storedProcedureName": "[dbo].[DATA_FLOW_EXEC_LOG_SP]",
+					"storedProcedureParameters": {
+						"EXEC_INSTANCE_ID": {
+							"value": {
+								"value": "@variables('InstanceID')",
+								"type": "Expression"
+							},
+							"type": "Int32"
+						},
+						"EXEC_STATUS": {
+							"value": "SUCCESS",
+							"type": "String"
+						},
+						"FLOW_ID": {
+							"value": {
+								"value": "@pipeline().parameters.FLOW_ID",
+								"type": "Expression"
+							},
+							"type": "Int32"
+						},
+						"StatementType": {
+							"value": "Update",
+							"type": "String"
+						}
+					}
+				},
+				"linkedServiceName": {
+					"referenceName": "SQLServerMetadataDB",
+					"type": "LinkedServiceReference"
+				}
+			},
+			{
+				"name": "Failure Of Flow",
+				"type": "SqlServerStoredProcedure",
+				"dependsOn": [
+					{
+						"activity": "LoopFlowID",
+						"dependencyConditions": [
+							"Failed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"storedProcedureName": "[dbo].[DATA_FLOW_EXEC_LOG_SP]",
+					"storedProcedureParameters": {
+						"EXEC_INSTANCE_ID": {
+							"value": {
+								"value": "@variables('InstanceID')",
+								"type": "Expression"
+							},
+							"type": "Int32"
+						},
+						"EXEC_STATUS": {
+							"value": "FAILED",
+							"type": "String"
+						},
+						"FLOW_ID": {
+							"value": {
+								"value": "@pipeline().parameters.FLOW_ID",
+								"type": "Expression"
+							},
+							"type": "Int32"
+						},
+						"StatementType": {
+							"value": "Update",
+							"type": "String"
+						}
+					}
+				},
+				"linkedServiceName": {
+					"referenceName": "SQLServerMetadataDB",
+					"type": "LinkedServiceReference"
+				}
+			},
+			{
+				"name": "Start Execution",
+				"type": "SqlServerStoredProcedure",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"storedProcedureName": "[dbo].[DATA_FLOW_EXEC_LOG_SP]",
+					"storedProcedureParameters": {
+						"EXEC_INSTANCE_ID": {
+							"value": null,
+							"type": "Int32"
+						},
+						"EXEC_STATUS": {
+							"value": "RUNNING",
+							"type": "String"
+						},
+						"FLOW_ID": {
+							"value": {
+								"value": "@pipeline().parameters.FLOW_ID",
+								"type": "Expression"
+							},
+							"type": "Int32"
+						},
+						"StatementType": {
+							"value": "Insert",
+							"type": "String"
+						}
+					}
+				},
+				"linkedServiceName": {
+					"referenceName": "SQLServerMetadataDB",
+					"type": "LinkedServiceReference"
+				}
+			}
+		],
+		"concurrency": 50,
+		"parameters": {
+			"groupID": {
+				"type": "String"
+			},
+			"FLOW_ID": {
+				"type": "string"
+			}
+		},
+		"variables": {
+			"InstanceID": {
+				"type": "String",
+				"defaultValue": "0"
+			}
+		},
+		"annotations": [],
+		"lastPublishTime": "2020-08-18T14:12:06Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}

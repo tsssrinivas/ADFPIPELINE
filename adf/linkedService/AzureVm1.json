@@ -1,0 +1,34 @@
+{
+	"name": "AzureVm1",
+	"type": "Microsoft.DataFactory/factories/linkedservices",
+	"properties": {
+		"annotations": [],
+		"parameters": {
+			"Host": {
+				"type": "String"
+			},
+			"User": {
+				"type": "String"
+			},
+			"Pass": {
+				"type": "String"
+			}
+		},
+		"type": "Sftp",
+		"typeProperties": {
+			"host": "@{linkedService().Host}",
+			"port": 22,
+			"skipHostKeyValidation": true,
+			"authenticationType": "Basic",
+			"userName": "@{linkedService().User}",
+			"password": {
+				"type": "AzureKeyVaultSecret",
+				"store": {
+					"referenceName": "iigkeyvault",
+					"type": "LinkedServiceReference"
+				},
+				"secretName": "@{linkedService().Pass}"
+			}
+		}
+	}
+}

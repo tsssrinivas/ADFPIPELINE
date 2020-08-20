@@ -1,0 +1,30 @@
+{
+	"name": "TempBlob",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "TempBlobStorage",
+			"type": "LinkedServiceReference"
+		},
+		"parameters": {
+			"table": {
+				"type": "string"
+			}
+		},
+		"annotations": [],
+		"type": "Parquet",
+		"typeProperties": {
+			"location": {
+				"type": "AzureBlobStorageLocation",
+				"folderPath": {
+					"value": "@concat('Bpost/HR/',dataset().table)",
+					"type": "Expression"
+				},
+				"container": "adf-temp"
+			},
+			"compressionCodec": "snappy",
+			"firstRowAsHeader": true
+		},
+		"schema": []
+	},
+	"type": "Microsoft.DataFactory/factories/datasets"
+}

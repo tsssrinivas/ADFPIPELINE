@@ -1,0 +1,36 @@
+{
+	"name": "Oracle_Connection",
+	"type": "Microsoft.DataFactory/factories/linkedservices",
+	"properties": {
+		"parameters": {
+			"host": {
+				"type": "string"
+			},
+			"sid": {
+				"type": "string"
+			},
+			"username": {
+				"type": "string"
+			},
+			"password": {
+				"type": "string"
+			}
+		},
+		"annotations": [],
+		"type": "Oracle",
+		"typeProperties": {
+			"connectionString": "host=@{linkedService().host};port=1521;sid=@{linkedService().sid};user id=@{linkedService().username}",
+			"password": {
+				"type": "AzureKeyVaultSecret",
+				"store": {
+					"referenceName": "iigkeyvault",
+					"type": "LinkedServiceReference"
+				},
+				"secretName": {
+					"value": "@linkedService().password",
+					"type": "Expression"
+				}
+			}
+		}
+	}
+}

@@ -1,0 +1,64 @@
+{
+	"name": "CsvDataset",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "AzureVm1",
+			"type": "LinkedServiceReference",
+			"parameters": {
+				"Host": {
+					"value": "@dataset().host",
+					"type": "Expression"
+				},
+				"User": {
+					"value": "@dataset().user",
+					"type": "Expression"
+				},
+				"Pass": {
+					"value": "@dataset().pass",
+					"type": "Expression"
+				}
+			}
+		},
+		"parameters": {
+			"host": {
+				"type": "string"
+			},
+			"user": {
+				"type": "string"
+			},
+			"pass": {
+				"type": "string"
+			},
+			"path": {
+				"type": "string"
+			},
+			"filename": {
+				"type": "string"
+			},
+			"isHeader": {
+				"type": "string"
+			}
+		},
+		"annotations": [],
+		"type": "DelimitedText",
+		"typeProperties": {
+			"location": {
+				"type": "SftpLocation",
+				"fileName": {
+					"value": "@dataset().filename",
+					"type": "Expression"
+				},
+				"folderPath": {
+					"value": "@dataset().path",
+					"type": "Expression"
+				}
+			},
+			"columnDelimiter": ",",
+			"escapeChar": "\\",
+			"firstRowAsHeader": true,
+			"quoteChar": "\""
+		},
+		"schema": []
+	},
+	"type": "Microsoft.DataFactory/factories/datasets"
+}

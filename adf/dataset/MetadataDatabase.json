@@ -1,0 +1,13 @@
+{
+	"name": "MetadataDatabase",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "MetadataMysql",
+			"type": "LinkedServiceReference"
+		},
+		"annotations": [],
+		"type": "MySqlTable",
+		"schema": []
+	},
+	"type": "Microsoft.DataFactory/factories/datasets"
+}

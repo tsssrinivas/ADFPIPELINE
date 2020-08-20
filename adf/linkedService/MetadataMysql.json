@@ -1,0 +1,22 @@
+{
+	"name": "MetadataMysql",
+	"type": "Microsoft.DataFactory/factories/linkedservices",
+	"properties": {
+		"annotations": [],
+		"type": "MySql",
+		"typeProperties": {
+			"connectionString": "Server=40.84.43.175;Port=3306;Database=iigmetadatadb;User=iiguser;SSLMode=1;UseSystemTrustStore=0",
+			"password": {
+				"type": "AzureKeyVaultSecret",
+				"store": {
+					"referenceName": "iigkeyvault",
+					"type": "LinkedServiceReference"
+				},
+				"secretName": {
+					"value": "mysqlpassword",
+					"type": "Expression"
+				}
+			}
+		}
+	}
+}
