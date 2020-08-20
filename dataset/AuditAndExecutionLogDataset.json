@@ -1,0 +1,25 @@
+{
+	"name": "AuditAndExecutionLogDataset",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "SQLServerMetadataDB",
+			"type": "LinkedServiceReference"
+		},
+		"parameters": {
+			"MetadataTableName": {
+				"type": "string"
+			}
+		},
+		"annotations": [],
+		"type": "AzureSqlTable",
+		"schema": [],
+		"typeProperties": {
+			"schema": "dbo",
+			"table": {
+				"value": "@dataset().MetadataTableName",
+				"type": "Expression"
+			}
+		}
+	},
+	"type": "Microsoft.DataFactory/factories/datasets"
+}

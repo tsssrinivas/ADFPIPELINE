@@ -1,0 +1,32 @@
+{
+	"name": "ExcelToHyperscale",
+	"properties": {
+		"type": "MappingDataFlow",
+		"typeProperties": {
+			"sources": [
+				{
+					"dataset": {
+						"referenceName": "TempBlob",
+						"type": "DatasetReference"
+					},
+					"name": "TempParquet"
+				}
+			],
+			"sinks": [
+				{
+					"dataset": {
+						"referenceName": "AzureHyperscale",
+						"type": "DatasetReference"
+					},
+					"name": "UpsertRDBMS"
+				}
+			],
+			"transformations": [
+				{
+					"name": "AlterRowUpsert"
+				}
+			],
+			"script": "parameters{\n\ttable as string,\n\tprimarykeys as string\n}\nsource(allowSchemaDrift: true,\n\tvalidateSchema: false,\n\tmoveFiles: [('Bpost/HR/' + $table + '/'),('Bpost/HR/' + $table + '_archive/')],\n\tformat: 'parquet',\n\twildcardPaths:[('Bpost/HR/' + $table + '/')]) ~> TempParquet\nTempParquet alterRow(upsertIf(true())) ~> AlterRowUpsert\nAlterRowUpsert sink(allowSchemaDrift: true,\n\tvalidateSchema: false,\n\tdeletable:false,\n\tinsertable:true,\n\tupdateable:false,\n\tupsertable:true,\n\tkeys:(split($primarykeys,',')),\n\tformat: 'table',\n\tskipDuplicateMapInputs: true,\n\tskipDuplicateMapOutputs: true) ~> UpsertRDBMS"
+		}
+	}
+}

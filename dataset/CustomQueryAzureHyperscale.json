@@ -1,0 +1,36 @@
+{
+	"name": "CustomQueryAzureHyperscale",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "AzureSqlDatabase1",
+			"type": "LinkedServiceReference",
+			"parameters": {
+				"host": "@dataset().host",
+				"db": {
+					"value": "@dataset().db",
+					"type": "Expression"
+				},
+				"username": "@dataset().username",
+				"password": "@dataset().password"
+			}
+		},
+		"parameters": {
+			"host": {
+				"type": "string"
+			},
+			"db": {
+				"type": "string"
+			},
+			"username": {
+				"type": "string"
+			},
+			"password": {
+				"type": "string"
+			}
+		},
+		"annotations": [],
+		"type": "AzureSqlTable",
+		"schema": []
+	},
+	"type": "Microsoft.DataFactory/factories/datasets"
+}

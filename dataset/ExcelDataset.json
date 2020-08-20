@@ -1,0 +1,93 @@
+{
+	"name": "ExcelDataset",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "AzureVm1",
+			"type": "LinkedServiceReference",
+			"parameters": {
+				"Host": "@dataset().host",
+				"User": "@dataset().user",
+				"Pass": "@dataset().pass"
+			}
+		},
+		"parameters": {
+			"host": {
+				"type": "string"
+			},
+			"user": {
+				"type": "string"
+			},
+			"pass": {
+				"type": "string"
+			},
+			"path": {
+				"type": "string"
+			},
+			"sheet": {
+				"type": "string"
+			},
+			"filename": {
+				"type": "string"
+			}
+		},
+		"annotations": [],
+		"type": "Excel",
+		"typeProperties": {
+			"sheetName": {
+				"value": "@dataset().sheet",
+				"type": "Expression"
+			},
+			"location": {
+				"type": "SftpLocation",
+				"fileName": {
+					"value": "@dataset().filename",
+					"type": "Expression"
+				},
+				"folderPath": {
+					"value": "@dataset().path",
+					"type": "Expression"
+				}
+			},
+			"firstRowAsHeader": true
+		},
+		"schema": [
+			{
+				"name": "Contract_ID",
+				"type": "String"
+			},
+			{
+				"name": "Customer_ID",
+				"type": "String"
+			},
+			{
+				"name": "Slice_ID",
+				"type": "String"
+			},
+			{
+				"name": "Slice_Type",
+				"type": "String"
+			},
+			{
+				"name": "Slice_Name",
+				"type": "String"
+			},
+			{
+				"name": "Parameter_ID",
+				"type": "String"
+			},
+			{
+				"name": "Parameter_Name",
+				"type": "String"
+			},
+			{
+				"name": "Threshold_min",
+				"type": "String"
+			},
+			{
+				"name": "Threshold_max",
+				"type": "String"
+			}
+		]
+	},
+	"type": "Microsoft.DataFactory/factories/datasets"
+}

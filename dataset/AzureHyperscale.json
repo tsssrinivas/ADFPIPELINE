@@ -1,0 +1,55 @@
+{
+	"name": "AzureHyperscale",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "AzureSqlDatabase1",
+			"type": "LinkedServiceReference",
+			"parameters": {
+				"host": "@dataset().host",
+				"db": {
+					"value": "@dataset().db",
+					"type": "Expression"
+				},
+				"username": "@dataset().username",
+				"password": "@dataset().password"
+			}
+		},
+		"parameters": {
+			"host": {
+				"type": "string"
+			},
+			"db": {
+				"type": "string"
+			},
+			"username": {
+				"type": "string"
+			},
+			"password": {
+				"type": "string"
+			},
+			"schema": {
+				"type": "string"
+			},
+			"table": {
+				"type": "string"
+			},
+			"primarykeys": {
+				"type": "string"
+			}
+		},
+		"annotations": [],
+		"type": "AzureSqlTable",
+		"schema": [],
+		"typeProperties": {
+			"schema": {
+				"value": "@dataset().schema",
+				"type": "Expression"
+			},
+			"table": {
+				"value": "@dataset().table",
+				"type": "Expression"
+			}
+		}
+	},
+	"type": "Microsoft.DataFactory/factories/datasets"
+}

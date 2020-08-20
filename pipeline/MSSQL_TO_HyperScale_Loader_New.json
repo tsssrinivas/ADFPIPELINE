@@ -1,0 +1,1648 @@
+{
+	"name": "MSSQL_TO_HyperScale_Loader_New",
+	"properties": {
+		"activities": [
+			{
+				"name": "LookupMetadataGroupId",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "SELECT GROUP_ID,OBJECT_ID,OBJECT_NAME,SRC_CONNECTION_ID,SRC_CONNECTION_TYPE_ID,SRC_SCHEMA,SRC_TABLE,SRC_COLUMNS,SRC_EXTRACT_TYPE,SRC_INCREMENTAL_COLUMN,SRC_INCREMENTAL_VALUE,TGT_INCREMENTAL_COLUMN,TGT_CONNECTION_ID,TGT_SCHEMA_NAME,TGT_TABLE_NAME,MAPPING_EXPRESSION,TGT_LOAD_OPTION,TGT_PRIMARY_KEY,s.CONNECTION_ID as RDBMS_CONNECTION_ID, s.DB_NAME AS SRC_DATABASE_NAME, s.SYSTEM_ID as SID, s.HOST_NAME as SRC_HOST_NAME, s.USERNAME as SRC_RDBMS_USERNAME, s.PASSWORD as SRC_RDBMS_PASSWORD,t.DB_NAME as SQL_DB_NAME,t.SYSTEM_ID as SQL_SCHEMA,t.HOST_NAME  as SQL_HOST_NAME,t.PORT_NUMBER as SQL_PORT_NUMBER,t.USERNAME as SQL_USERNAME,t.PASSWORD as SQL_PASSWORD FROM dbo.RDBMS_INGESTION_DETAILS r left join dbo.RDBMS_CONNECTION_DETAILS s on r.SRC_CONNECTION_ID = s.CONNECTION_ID left join dbo.RDBMS_CONNECTION_DETAILS t on r.TGT_CONNECTION_ID = s.CONNECTION_ID where group_id=@{pipeline().parameters.groupID}",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "SQLServerMetadataDataset",
+						"type": "DatasetReference"
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "ForEachObject",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "LookupMetadataGroupId",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@activity('LookupMetadataGroupId').output.value",
+						"type": "Expression"
+					},
+					"batchCount": 5,
+					"activities": [
+						{
+							"name": "If Condition For Full or INCR Load",
+							"type": "IfCondition",
+							"dependsOn": [
+								{
+									"activity": "Start Execution",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"userProperties": [],
+							"typeProperties": {
+								"expression": {
+									"value": "@equals(toLower(item().SRC_EXTRACT_TYPE),'full')",
+									"type": "Expression"
+								},
+								"ifFalseActivities": [
+									{
+										"name": "SqlWriteMode_INCR",
+										"type": "Switch",
+										"dependsOn": [
+											{
+												"activity": "Form INCR Select Query",
+												"dependencyConditions": [
+													"Succeeded"
+												]
+											}
+										],
+										"userProperties": [],
+										"typeProperties": {
+											"on": {
+												"value": "@toLower(item().TGT_LOAD_OPTION)",
+												"type": "Expression"
+											},
+											"cases": [
+												{
+													"value": "upsert",
+													"activities": [
+														{
+															"name": "RDBMStoTempBlob_Incr",
+															"type": "Copy",
+															"dependsOn": [],
+															"policy": {
+																"timeout": "7.00:00:00",
+																"retry": 0,
+																"retryIntervalInSeconds": 30,
+																"secureOutput": false,
+																"secureInput": false
+															},
+															"userProperties": [],
+															"typeProperties": {
+																"source": {
+																	"type": "AzureSqlSource",
+																	"sqlReaderQuery": {
+																		"value": "@variables('SelectQuery')",
+																		"type": "Expression"
+																	},
+																	"queryTimeout": "02:00:00",
+																	"partitionOption": "None"
+																},
+																"sink": {
+																	"type": "ParquetSink",
+																	"storeSettings": {
+																		"type": "AzureBlobStorageWriteSettings"
+																	}
+																},
+																"enableStaging": false,
+																"translator": {
+																	"value": "@json(item().MAPPING_EXPRESSION)",
+																	"type": "Expression"
+																}
+															},
+															"inputs": [
+																{
+																	"referenceName": "AzureHyperscale",
+																	"type": "DatasetReference",
+																	"parameters": {
+																		"host": {
+																			"value": "@item().SRC_HOST_NAME",
+																			"type": "Expression"
+																		},
+																		"db": {
+																			"value": "@item().SRC_DATABASE_NAME",
+																			"type": "Expression"
+																		},
+																		"username": {
+																			"value": "@item().SRC_RDBMS_USERNAME",
+																			"type": "Expression"
+																		},
+																		"password": {
+																			"value": "@item().SRC_RDBMS_PASSWORD",
+																			"type": "Expression"
+																		},
+																		"schema": {
+																			"value": "@item().SRC_SCHEMA",
+																			"type": "Expression"
+																		},
+																		"table": {
+																			"value": "@item().SRC_TABLE",
+																			"type": "Expression"
+																		},
+																		"primarykeys": {
+																			"value": "@item().TGT_PRIMARY_KEY",
+																			"type": "Expression"
+																		}
+																	}
+																}
+															],
+															"outputs": [
+																{
+																	"referenceName": "TempBlob",
+																	"type": "DatasetReference",
+																	"parameters": {
+																		"table": "@item().TGT_TABLE_NAME"
+																	}
+																}
+															]
+														},
+														{
+															"name": "FileToHyperscale_Incr",
+															"type": "ExecuteDataFlow",
+															"dependsOn": [
+																{
+																	"activity": "RDBMStoTempBlob_Incr",
+																	"dependencyConditions": [
+																		"Succeeded"
+																	]
+																}
+															],
+															"policy": {
+																"timeout": "7.00:00:00",
+																"retry": 0,
+																"retryIntervalInSeconds": 30,
+																"secureOutput": false,
+																"secureInput": false
+															},
+															"userProperties": [],
+															"typeProperties": {
+																"dataflow": {
+																	"referenceName": "ExcelToHyperscale",
+																	"type": "DataFlowReference",
+																	"parameters": {
+																		"table": {
+																			"value": "'@{item().TGT_TABLE_NAME}'",
+																			"type": "Expression"
+																		},
+																		"primarykeys": {
+																			"value": "'@{item().TGT_PRIMARY_KEY}'",
+																			"type": "Expression"
+																		}
+																	},
+																	"datasetParameters": {
+																		"TempParquet": {
+																			"table": "@item().TGT_TABLE_NAME"
+																		},
+																		"UpsertRDBMS": {
+																			"host": "@item().SQL_HOST_NAME",
+																			"db": "@item().SQL_DB_NAME",
+																			"username": "@item().SQL_USERNAME",
+																			"password": "@item().SQL_PASSWORD",
+																			"schema": "@item().TGT_SCHEMA_NAME",
+																			"table": "@item().TGT_TABLE_NAME",
+																			"primarykeys": "@item().TGT_PRIMARY_KEY"
+																		}
+																	}
+																},
+																"compute": {
+																	"coreCount": 8,
+																	"computeType": "General"
+																}
+															}
+														}
+													]
+												},
+												{
+													"value": "append",
+													"activities": [
+														{
+															"name": "RDBMSToHyperscaleAppend_Incr",
+															"type": "Copy",
+															"dependsOn": [],
+															"policy": {
+																"timeout": "7.00:00:00",
+																"retry": 0,
+																"retryIntervalInSeconds": 30,
+																"secureOutput": false,
+																"secureInput": false
+															},
+															"userProperties": [],
+															"typeProperties": {
+																"source": {
+																	"type": "AzureSqlSource",
+																	"sqlReaderQuery": {
+																		"value": "@variables('SelectQuery')",
+																		"type": "Expression"
+																	},
+																	"queryTimeout": "02:00:00",
+																	"partitionOption": "None"
+																},
+																"sink": {
+																	"type": "AzureSqlSink"
+																},
+																"enableStaging": false,
+																"translator": {
+																	"value": "@json(item().MAPPING_EXPRESSION)",
+																	"type": "Expression"
+																}
+															},
+															"inputs": [
+																{
+																	"referenceName": "AzureHyperscale",
+																	"type": "DatasetReference",
+																	"parameters": {
+																		"host": {
+																			"value": "@item().SRC_HOST_NAME",
+																			"type": "Expression"
+																		},
+																		"db": {
+																			"value": "@item().SRC_DATABASE_NAME",
+																			"type": "Expression"
+																		},
+																		"username": {
+																			"value": "@item().SRC_RDBMS_USERNAME",
+																			"type": "Expression"
+																		},
+																		"password": {
+																			"value": "@item().SRC_RDBMS_PASSWORD",
+																			"type": "Expression"
+																		},
+																		"schema": {
+																			"value": "@item().SRC_SCHEMA",
+																			"type": "Expression"
+																		},
+																		"table": {
+																			"value": "@item().SRC_TABLE",
+																			"type": "Expression"
+																		},
+																		"primarykeys": {
+																			"value": "@item().TGT_PRIMARY_KEY",
+																			"type": "Expression"
+																		}
+																	}
+																}
+															],
+															"outputs": [
+																{
+																	"referenceName": "AzureHyperscale",
+																	"type": "DatasetReference",
+																	"parameters": {
+																		"host": "@item().SQL_HOST_NAME",
+																		"db": "@item().SQL_DB_NAME",
+																		"username": "@item().SQL_USERNAME",
+																		"password": "@item().SQL_PASSWORD",
+																		"schema": "@item().TGT_SCHEMA_NAME",
+																		"table": "@item().TGT_TABLE_NAME",
+																		"primarykeys": "@item().TGT_PRIMARY_KEY"
+																	}
+																}
+															]
+														},
+														{
+															"name": "Update Audit Table Append_Incr",
+															"type": "SqlServerStoredProcedure",
+															"dependsOn": [
+																{
+																	"activity": "RDBMSToHyperscaleAppend_Incr",
+																	"dependencyConditions": [
+																		"Succeeded"
+																	]
+																}
+															],
+															"policy": {
+																"timeout": "7.00:00:00",
+																"retry": 0,
+																"retryIntervalInSeconds": 30,
+																"secureOutput": false,
+																"secureInput": false
+															},
+															"userProperties": [],
+															"typeProperties": {
+																"storedProcedureName": "[dbo].[DATA_FACTORY_PIPELINE_EXEC_LOG_SP]",
+																"storedProcedureParameters": {
+																	"EXEC_START_TIME": {
+																		"value": null,
+																		"type": "DateTime"
+																	},
+																	"EXEC_STATUS": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"GROUP_ID": {
+																		"value": {
+																			"value": "@pipeline().parameters.groupID",
+																			"type": "Expression"
+																		},
+																		"type": "Int32"
+																	},
+																	"OBJECT_ID": {
+																		"value": {
+																			"value": "@item().OBJECT_ID",
+																			"type": "Expression"
+																		},
+																		"type": "Int32"
+																	},
+																	"OBJECT_NAME": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"PIPELINE_NAME": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"RUN_ID": {
+																		"value": {
+																			"value": "@pipeline().RunId",
+																			"type": "Expression"
+																		},
+																		"type": "String"
+																	},
+																	"SRC_EXTRACT_TYPE": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"SRC_REC_COUNT": {
+																		"value": {
+																			"value": "@activity('RDBMSToHyperscaleAppend_Incr').output.rowsRead",
+																			"type": "Expression"
+																		},
+																		"type": "String"
+																	},
+																	"StatementType": {
+																		"value": "UpdateCount",
+																		"type": "String"
+																	},
+																	"TGT_LOAD_TYPE": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"TGT_REC_COUNT": {
+																		"value": {
+																			"value": "@activity('RDBMSToHyperscaleAppend_Incr').output.rowsCopied",
+																			"type": "Expression"
+																		},
+																		"type": "String"
+																	},
+																	"TRIGGER_ID": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"TRIGGER_NAME": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"TRIGGER_TYPE": {
+																		"value": null,
+																		"type": "String"
+																	}
+																}
+															},
+															"linkedServiceName": {
+																"referenceName": "SQLServerMetadataDB",
+																"type": "LinkedServiceReference"
+															}
+														}
+													]
+												},
+												{
+													"value": "overwrite",
+													"activities": [
+														{
+															"name": "RDBMSToHyperscaleOverwrite_Incr",
+															"type": "Copy",
+															"dependsOn": [],
+															"policy": {
+																"timeout": "7.00:00:00",
+																"retry": 0,
+																"retryIntervalInSeconds": 30,
+																"secureOutput": false,
+																"secureInput": false
+															},
+															"userProperties": [],
+															"typeProperties": {
+																"source": {
+																	"type": "AzureSqlSource",
+																	"sqlReaderQuery": {
+																		"value": "@variables('SelectQuery')",
+																		"type": "Expression"
+																	},
+																	"queryTimeout": "02:00:00",
+																	"partitionOption": "None"
+																},
+																"sink": {
+																	"type": "AzureSqlSink",
+																	"preCopyScript": {
+																		"value": "@{concat('TRUNCATE TABLE ',concat(item().TGT_SCHEMA_NAME,'.',item().TGT_TABLE_NAME))}",
+																		"type": "Expression"
+																	},
+																	"tableOption": "autoCreate",
+																	"disableMetricsCollection": false
+																},
+																"enableStaging": false,
+																"translator": {
+																	"value": "@json(item().MAPPING_EXPRESSION)",
+																	"type": "Expression"
+																}
+															},
+															"inputs": [
+																{
+																	"referenceName": "AzureHyperscale",
+																	"type": "DatasetReference",
+																	"parameters": {
+																		"host": {
+																			"value": "@item().SRC_HOST_NAME",
+																			"type": "Expression"
+																		},
+																		"db": {
+																			"value": "@item().SRC_DATABASE_NAME",
+																			"type": "Expression"
+																		},
+																		"username": {
+																			"value": "@item().SRC_RDBMS_USERNAME",
+																			"type": "Expression"
+																		},
+																		"password": {
+																			"value": "@item().SRC_RDBMS_PASSWORD",
+																			"type": "Expression"
+																		},
+																		"schema": {
+																			"value": "@item().SRC_SCHEMA",
+																			"type": "Expression"
+																		},
+																		"table": {
+																			"value": "@item().SRC_TABLE",
+																			"type": "Expression"
+																		},
+																		"primarykeys": {
+																			"value": "@item().TGT_PRIMARY_KEY",
+																			"type": "Expression"
+																		}
+																	}
+																}
+															],
+															"outputs": [
+																{
+																	"referenceName": "AzureHyperscale",
+																	"type": "DatasetReference",
+																	"parameters": {
+																		"host": "@item().SQL_HOST_NAME",
+																		"db": "@item().SQL_DB_NAME",
+																		"username": "@item().SQL_USERNAME",
+																		"password": "@item().SQL_PASSWORD",
+																		"schema": "@item().TGT_SCHEMA_NAME",
+																		"table": "@item().TGT_TABLE_NAME",
+																		"primarykeys": "@item().TGT_PRIMARY_KEY"
+																	}
+																}
+															]
+														},
+														{
+															"name": "Update Audit Table Overwrite_Incr",
+															"type": "SqlServerStoredProcedure",
+															"dependsOn": [
+																{
+																	"activity": "RDBMSToHyperscaleOverwrite_Incr",
+																	"dependencyConditions": [
+																		"Succeeded"
+																	]
+																}
+															],
+															"policy": {
+																"timeout": "7.00:00:00",
+																"retry": 0,
+																"retryIntervalInSeconds": 30,
+																"secureOutput": false,
+																"secureInput": false
+															},
+															"userProperties": [],
+															"typeProperties": {
+																"storedProcedureName": "[dbo].[DATA_FACTORY_PIPELINE_EXEC_LOG_SP]",
+																"storedProcedureParameters": {
+																	"EXEC_START_TIME": {
+																		"value": null,
+																		"type": "DateTime"
+																	},
+																	"EXEC_STATUS": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"GROUP_ID": {
+																		"value": {
+																			"value": "@pipeline().parameters.groupID",
+																			"type": "Expression"
+																		},
+																		"type": "Int32"
+																	},
+																	"OBJECT_ID": {
+																		"value": {
+																			"value": "@item().OBJECT_ID",
+																			"type": "Expression"
+																		},
+																		"type": "Int32"
+																	},
+																	"OBJECT_NAME": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"PIPELINE_NAME": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"RUN_ID": {
+																		"value": {
+																			"value": "@pipeline().RunId",
+																			"type": "Expression"
+																		},
+																		"type": "String"
+																	},
+																	"SRC_EXTRACT_TYPE": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"SRC_REC_COUNT": {
+																		"value": {
+																			"value": "@activity('RDBMSToHyperscaleOverwrite_Incr').output.rowsRead",
+																			"type": "Expression"
+																		},
+																		"type": "String"
+																	},
+																	"StatementType": {
+																		"value": "UpdateCount",
+																		"type": "String"
+																	},
+																	"TGT_LOAD_TYPE": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"TGT_REC_COUNT": {
+																		"value": {
+																			"value": "@activity('RDBMSToHyperscaleOverwrite_Incr').output.rowsCopied",
+																			"type": "Expression"
+																		},
+																		"type": "String"
+																	},
+																	"TRIGGER_ID": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"TRIGGER_NAME": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"TRIGGER_TYPE": {
+																		"value": null,
+																		"type": "String"
+																	}
+																}
+															},
+															"linkedServiceName": {
+																"referenceName": "SQLServerMetadataDB",
+																"type": "LinkedServiceReference"
+															}
+														}
+													]
+												}
+											]
+										}
+									},
+									{
+										"name": "Form INCR Select Query",
+										"type": "SetVariable",
+										"dependsOn": [],
+										"userProperties": [],
+										"typeProperties": {
+											"variableName": "SelectQuery",
+											"value": {
+												"value": "@{concat('SELECT ', item().SRC_COLUMNS,' FROM ',item().SRC_SCHEMA,'.',item().SRC_TABLE, ' WHERE ', item().SRC_INCREMENTAL_COLUMN, ' > ', '''',item().SRC_INCREMENTAL_VALUE,'''')}",
+												"type": "Expression"
+											}
+										}
+									},
+									{
+										"name": "Get Target Max Value",
+										"type": "Lookup",
+										"dependsOn": [
+											{
+												"activity": "SqlWriteMode_INCR",
+												"dependencyConditions": [
+													"Succeeded"
+												]
+											}
+										],
+										"policy": {
+											"timeout": "7.00:00:00",
+											"retry": 0,
+											"retryIntervalInSeconds": 30,
+											"secureOutput": false,
+											"secureInput": false
+										},
+										"userProperties": [],
+										"typeProperties": {
+											"source": {
+												"type": "AzureSqlSource",
+												"sqlReaderQuery": {
+													"value": "@{concat('SELECT MAX(', item().TGT_INCREMENTAL_COLUMN, ') as MaxDate FROM ',item().TGT_SCHEMA_NAME,'.',item().TGT_TABLE_NAME)}",
+													"type": "Expression"
+												},
+												"queryTimeout": "02:00:00",
+												"partitionOption": "None"
+											},
+											"dataset": {
+												"referenceName": "AzureHyperscale",
+												"type": "DatasetReference",
+												"parameters": {
+													"host": {
+														"value": "@item().SQL_HOST_NAME",
+														"type": "Expression"
+													},
+													"db": {
+														"value": "@item().SQL_DB_NAME",
+														"type": "Expression"
+													},
+													"username": {
+														"value": "@item().SQL_USERNAME",
+														"type": "Expression"
+													},
+													"password": {
+														"value": "@item().SQL_PASSWORD",
+														"type": "Expression"
+													},
+													"schema": {
+														"value": "@item().TGT_SCHEMA_NAME",
+														"type": "Expression"
+													},
+													"table": {
+														"value": "@item().TGT_TABLE_NAME",
+														"type": "Expression"
+													},
+													"primarykeys": {
+														"value": "@item().TGT_PRIMARY_KEY",
+														"type": "Expression"
+													}
+												}
+											}
+										}
+									},
+									{
+										"name": "Update Max Value In Metadata DB",
+										"type": "SqlServerStoredProcedure",
+										"dependsOn": [
+											{
+												"activity": "Get Target Max Value",
+												"dependencyConditions": [
+													"Succeeded"
+												]
+											}
+										],
+										"policy": {
+											"timeout": "7.00:00:00",
+											"retry": 0,
+											"retryIntervalInSeconds": 30,
+											"secureOutput": false,
+											"secureInput": false
+										},
+										"userProperties": [],
+										"typeProperties": {
+											"storedProcedureName": "[dbo].[RDBMS_INGESTION_DETAILS_SP]",
+											"storedProcedureParameters": {
+												"GROUP_ID": {
+													"value": {
+														"value": "@pipeline().parameters.groupID",
+														"type": "Expression"
+													},
+													"type": "Int32"
+												},
+												"OBJECT_ID": {
+													"value": {
+														"value": "@item().OBJECT_ID",
+														"type": "Expression"
+													},
+													"type": "Int32"
+												},
+												"SRC_INCREMENTAL_VALUE": {
+													"value": {
+														"value": "@activity('Get Target Max Value').output.firstRow.MaxDate",
+														"type": "Expression"
+													},
+													"type": "String"
+												}
+											}
+										},
+										"linkedServiceName": {
+											"referenceName": "SQLServerMetadataDB",
+											"type": "LinkedServiceReference"
+										}
+									}
+								],
+								"ifTrueActivities": [
+									{
+										"name": "SqlWriteMode",
+										"type": "Switch",
+										"dependsOn": [
+											{
+												"activity": "Form Full Load Select Query",
+												"dependencyConditions": [
+													"Succeeded"
+												]
+											}
+										],
+										"userProperties": [],
+										"typeProperties": {
+											"on": {
+												"value": "@toLower(item().TGT_LOAD_OPTION)",
+												"type": "Expression"
+											},
+											"cases": [
+												{
+													"value": "upsert",
+													"activities": [
+														{
+															"name": "RDBMStoTempBlob",
+															"type": "Copy",
+															"dependsOn": [],
+															"policy": {
+																"timeout": "7.00:00:00",
+																"retry": 0,
+																"retryIntervalInSeconds": 30,
+																"secureOutput": false,
+																"secureInput": false
+															},
+															"userProperties": [],
+															"typeProperties": {
+																"source": {
+																	"type": "AzureSqlSource",
+																	"sqlReaderQuery": {
+																		"value": "@variables('SelectQuery')",
+																		"type": "Expression"
+																	},
+																	"queryTimeout": "02:00:00",
+																	"partitionOption": "None"
+																},
+																"sink": {
+																	"type": "ParquetSink",
+																	"storeSettings": {
+																		"type": "AzureBlobStorageWriteSettings"
+																	}
+																},
+																"enableStaging": false,
+																"translator": {
+																	"value": "@json(item().MAPPING_EXPRESSION)",
+																	"type": "Expression"
+																}
+															},
+															"inputs": [
+																{
+																	"referenceName": "AzureHyperscale",
+																	"type": "DatasetReference",
+																	"parameters": {
+																		"host": {
+																			"value": "@item().SRC_HOST_NAME",
+																			"type": "Expression"
+																		},
+																		"db": {
+																			"value": "@item().SRC_DATABASE_NAME",
+																			"type": "Expression"
+																		},
+																		"username": {
+																			"value": "@item().SRC_RDBMS_USERNAME",
+																			"type": "Expression"
+																		},
+																		"password": {
+																			"value": "@item().SRC_RDBMS_PASSWORD",
+																			"type": "Expression"
+																		},
+																		"schema": {
+																			"value": "@item().SRC_SCHEMA",
+																			"type": "Expression"
+																		},
+																		"table": {
+																			"value": "@item().SRC_TABLE",
+																			"type": "Expression"
+																		},
+																		"primarykeys": {
+																			"value": "@item().TGT_PRIMARY_KEY",
+																			"type": "Expression"
+																		}
+																	}
+																}
+															],
+															"outputs": [
+																{
+																	"referenceName": "TempBlob",
+																	"type": "DatasetReference",
+																	"parameters": {
+																		"table": {
+																			"value": "@item().TGT_TABLE_NAME",
+																			"type": "Expression"
+																		}
+																	}
+																}
+															]
+														},
+														{
+															"name": "FileToHyperscale",
+															"type": "ExecuteDataFlow",
+															"dependsOn": [
+																{
+																	"activity": "RDBMStoTempBlob",
+																	"dependencyConditions": [
+																		"Succeeded"
+																	]
+																}
+															],
+															"policy": {
+																"timeout": "7.00:00:00",
+																"retry": 0,
+																"retryIntervalInSeconds": 30,
+																"secureOutput": false,
+																"secureInput": false
+															},
+															"userProperties": [],
+															"typeProperties": {
+																"dataflow": {
+																	"referenceName": "ExcelToHyperscale",
+																	"type": "DataFlowReference",
+																	"parameters": {
+																		"table": {
+																			"value": "'@{item().TGT_TABLE_NAME}'",
+																			"type": "Expression"
+																		},
+																		"primarykeys": {
+																			"value": "'@{item().TGT_PRIMARY_KEY}'",
+																			"type": "Expression"
+																		}
+																	},
+																	"datasetParameters": {
+																		"TempParquet": {
+																			"table": "@item().TGT_TABLE_NAME"
+																		},
+																		"UpsertRDBMS": {
+																			"host": "@item().SQL_HOST_NAME",
+																			"db": "@item().SQL_DB_NAME",
+																			"username": "@item().SQL_USERNAME",
+																			"password": "@item().SQL_PASSWORD",
+																			"schema": "@item().TGT_SCHEMA_NAME",
+																			"table": "@item().TGT_TABLE_NAME",
+																			"primarykeys": "@item().TGT_PRIMARY_KEY"
+																		}
+																	}
+																},
+																"compute": {
+																	"coreCount": 8,
+																	"computeType": "General"
+																}
+															}
+														}
+													]
+												},
+												{
+													"value": "append",
+													"activities": [
+														{
+															"name": "RDBMSToHyperscaleAppend",
+															"type": "Copy",
+															"dependsOn": [],
+															"policy": {
+																"timeout": "7.00:00:00",
+																"retry": 0,
+																"retryIntervalInSeconds": 30,
+																"secureOutput": false,
+																"secureInput": false
+															},
+															"userProperties": [],
+															"typeProperties": {
+																"source": {
+																	"type": "AzureSqlSource",
+																	"sqlReaderQuery": {
+																		"value": "@variables('SelectQuery')",
+																		"type": "Expression"
+																	},
+																	"queryTimeout": "02:00:00",
+																	"partitionOption": "None"
+																},
+																"sink": {
+																	"type": "AzureSqlSink"
+																},
+																"enableStaging": false,
+																"translator": {
+																	"value": "@json(item().MAPPING_EXPRESSION)",
+																	"type": "Expression"
+																}
+															},
+															"inputs": [
+																{
+																	"referenceName": "AzureHyperscale",
+																	"type": "DatasetReference",
+																	"parameters": {
+																		"host": {
+																			"value": "@item().SRC_HOST_NAME",
+																			"type": "Expression"
+																		},
+																		"db": {
+																			"value": "@item().SRC_DATABASE_NAME",
+																			"type": "Expression"
+																		},
+																		"username": {
+																			"value": "@item().SRC_RDBMS_USERNAME",
+																			"type": "Expression"
+																		},
+																		"password": {
+																			"value": "@item().SRC_RDBMS_PASSWORD",
+																			"type": "Expression"
+																		},
+																		"schema": {
+																			"value": "@item().SRC_SCHEMA",
+																			"type": "Expression"
+																		},
+																		"table": {
+																			"value": "@item().SRC_TABLE",
+																			"type": "Expression"
+																		},
+																		"primarykeys": {
+																			"value": "@item().TGT_PRIMARY_KEY",
+																			"type": "Expression"
+																		}
+																	}
+																}
+															],
+															"outputs": [
+																{
+																	"referenceName": "AzureHyperscale",
+																	"type": "DatasetReference",
+																	"parameters": {
+																		"host": "@item().SQL_HOST_NAME",
+																		"db": "@item().SQL_DB_NAME",
+																		"username": "@item().SQL_USERNAME",
+																		"password": "@item().SQL_PASSWORD",
+																		"schema": "@item().TGT_SCHEMA_NAME",
+																		"table": "@item().TGT_TABLE_NAME",
+																		"primarykeys": "@item().TGT_PRIMARY_KEY"
+																	}
+																}
+															]
+														},
+														{
+															"name": "Update Audit Table Append",
+															"type": "SqlServerStoredProcedure",
+															"dependsOn": [
+																{
+																	"activity": "RDBMSToHyperscaleAppend",
+																	"dependencyConditions": [
+																		"Succeeded"
+																	]
+																}
+															],
+															"policy": {
+																"timeout": "7.00:00:00",
+																"retry": 0,
+																"retryIntervalInSeconds": 30,
+																"secureOutput": false,
+																"secureInput": false
+															},
+															"userProperties": [],
+															"typeProperties": {
+																"storedProcedureName": "[dbo].[DATA_FACTORY_PIPELINE_EXEC_LOG_SP]",
+																"storedProcedureParameters": {
+																	"EXEC_START_TIME": {
+																		"value": null,
+																		"type": "DateTime"
+																	},
+																	"EXEC_STATUS": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"GROUP_ID": {
+																		"value": {
+																			"value": "@pipeline().parameters.groupID",
+																			"type": "Expression"
+																		},
+																		"type": "Int32"
+																	},
+																	"OBJECT_ID": {
+																		"value": {
+																			"value": "@item().OBJECT_ID",
+																			"type": "Expression"
+																		},
+																		"type": "Int32"
+																	},
+																	"OBJECT_NAME": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"PIPELINE_NAME": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"RUN_ID": {
+																		"value": {
+																			"value": "@pipeline().RunId",
+																			"type": "Expression"
+																		},
+																		"type": "String"
+																	},
+																	"SRC_EXTRACT_TYPE": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"SRC_REC_COUNT": {
+																		"value": {
+																			"value": "@activity('RDBMSToHyperscaleAppend').output.rowsRead",
+																			"type": "Expression"
+																		},
+																		"type": "String"
+																	},
+																	"StatementType": {
+																		"value": "UpdateCount",
+																		"type": "String"
+																	},
+																	"TGT_LOAD_TYPE": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"TGT_REC_COUNT": {
+																		"value": {
+																			"value": "@activity('RDBMSToHyperscaleAppend').output.rowsCopied",
+																			"type": "Expression"
+																		},
+																		"type": "String"
+																	},
+																	"TRIGGER_ID": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"TRIGGER_NAME": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"TRIGGER_TYPE": {
+																		"value": null,
+																		"type": "String"
+																	}
+																}
+															},
+															"linkedServiceName": {
+																"referenceName": "SQLServerMetadataDB",
+																"type": "LinkedServiceReference"
+															}
+														}
+													]
+												},
+												{
+													"value": "overwrite",
+													"activities": [
+														{
+															"name": "RDBMSToHyperscaleOverwrite",
+															"type": "Copy",
+															"dependsOn": [],
+															"policy": {
+																"timeout": "7.00:00:00",
+																"retry": 0,
+																"retryIntervalInSeconds": 30,
+																"secureOutput": false,
+																"secureInput": false
+															},
+															"userProperties": [],
+															"typeProperties": {
+																"source": {
+																	"type": "AzureSqlSource",
+																	"sqlReaderQuery": {
+																		"value": "@variables('SelectQuery')",
+																		"type": "Expression"
+																	},
+																	"queryTimeout": "02:00:00",
+																	"partitionOption": "None"
+																},
+																"sink": {
+																	"type": "AzureSqlSink",
+																	"preCopyScript": {
+																		"value": "@{concat('TRUNCATE TABLE ',concat(item().TGT_SCHEMA_NAME,'.',item().TGT_TABLE_NAME))}",
+																		"type": "Expression"
+																	},
+																	"tableOption": "autoCreate",
+																	"disableMetricsCollection": false
+																},
+																"enableStaging": false,
+																"translator": {
+																	"value": "@json(item().MAPPING_EXPRESSION)",
+																	"type": "Expression"
+																}
+															},
+															"inputs": [
+																{
+																	"referenceName": "AzureHyperscale",
+																	"type": "DatasetReference",
+																	"parameters": {
+																		"host": {
+																			"value": "@item().SRC_HOST_NAME",
+																			"type": "Expression"
+																		},
+																		"db": {
+																			"value": "@item().SRC_DATABASE_NAME",
+																			"type": "Expression"
+																		},
+																		"username": {
+																			"value": "@item().SRC_RDBMS_USERNAME",
+																			"type": "Expression"
+																		},
+																		"password": {
+																			"value": "@item().SRC_RDBMS_PASSWORD",
+																			"type": "Expression"
+																		},
+																		"schema": {
+																			"value": "@item().SRC_SCHEMA",
+																			"type": "Expression"
+																		},
+																		"table": {
+																			"value": "@item().SRC_TABLE",
+																			"type": "Expression"
+																		},
+																		"primarykeys": {
+																			"value": "@item().TGT_PRIMARY_KEY",
+																			"type": "Expression"
+																		}
+																	}
+																}
+															],
+															"outputs": [
+																{
+																	"referenceName": "AzureHyperscale",
+																	"type": "DatasetReference",
+																	"parameters": {
+																		"host": "@item().SQL_HOST_NAME",
+																		"db": "@item().SQL_DB_NAME",
+																		"username": "@item().SQL_USERNAME",
+																		"password": "@item().SQL_PASSWORD",
+																		"schema": "@item().TGT_SCHEMA_NAME",
+																		"table": "@item().TGT_TABLE_NAME",
+																		"primarykeys": "@item().TGT_PRIMARY_KEY"
+																	}
+																}
+															]
+														},
+														{
+															"name": "Update Audit Table Overwrite",
+															"type": "SqlServerStoredProcedure",
+															"dependsOn": [
+																{
+																	"activity": "RDBMSToHyperscaleOverwrite",
+																	"dependencyConditions": [
+																		"Succeeded"
+																	]
+																}
+															],
+															"policy": {
+																"timeout": "7.00:00:00",
+																"retry": 0,
+																"retryIntervalInSeconds": 30,
+																"secureOutput": false,
+																"secureInput": false
+															},
+															"userProperties": [],
+															"typeProperties": {
+																"storedProcedureName": "[dbo].[DATA_FACTORY_PIPELINE_EXEC_LOG_SP]",
+																"storedProcedureParameters": {
+																	"EXEC_START_TIME": {
+																		"value": null,
+																		"type": "DateTime"
+																	},
+																	"EXEC_STATUS": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"GROUP_ID": {
+																		"value": {
+																			"value": "@pipeline().parameters.groupID",
+																			"type": "Expression"
+																		},
+																		"type": "Int32"
+																	},
+																	"OBJECT_ID": {
+																		"value": {
+																			"value": "@item().OBJECT_ID",
+																			"type": "Expression"
+																		},
+																		"type": "Int32"
+																	},
+																	"OBJECT_NAME": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"PIPELINE_NAME": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"RUN_ID": {
+																		"value": {
+																			"value": "@pipeline().RunId",
+																			"type": "Expression"
+																		},
+																		"type": "String"
+																	},
+																	"SRC_EXTRACT_TYPE": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"SRC_REC_COUNT": {
+																		"value": {
+																			"value": "@activity('RDBMSToHyperscaleOverwrite').output.rowsRead",
+																			"type": "Expression"
+																		},
+																		"type": "String"
+																	},
+																	"StatementType": {
+																		"value": "UpdateCount",
+																		"type": "String"
+																	},
+																	"TGT_LOAD_TYPE": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"TGT_REC_COUNT": {
+																		"value": {
+																			"value": "@activity('RDBMSToHyperscaleOverwrite').output.rowsCopied",
+																			"type": "Expression"
+																		},
+																		"type": "String"
+																	},
+																	"TRIGGER_ID": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"TRIGGER_NAME": {
+																		"value": null,
+																		"type": "String"
+																	},
+																	"TRIGGER_TYPE": {
+																		"value": null,
+																		"type": "String"
+																	}
+																}
+															},
+															"linkedServiceName": {
+																"referenceName": "SQLServerMetadataDB",
+																"type": "LinkedServiceReference"
+															}
+														}
+													]
+												}
+											]
+										}
+									},
+									{
+										"name": "Form Full Load Select Query",
+										"type": "SetVariable",
+										"dependsOn": [],
+										"userProperties": [],
+										"typeProperties": {
+											"variableName": "SelectQuery",
+											"value": {
+												"value": "@{concat('SELECT ', item().SRC_COLUMNS,' FROM ', item().SRC_SCHEMA,'.',item().SRC_TABLE)}",
+												"type": "Expression"
+											}
+										}
+									}
+								]
+							}
+						},
+						{
+							"name": "Start Execution",
+							"type": "SqlServerStoredProcedure",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"storedProcedureName": "[dbo].[DATA_FACTORY_PIPELINE_EXEC_LOG_SP]",
+								"storedProcedureParameters": {
+									"EXEC_START_TIME": {
+										"value": null,
+										"type": "DateTime"
+									},
+									"EXEC_STATUS": {
+										"value": null,
+										"type": "String"
+									},
+									"GROUP_ID": {
+										"value": {
+											"value": "@pipeline().parameters.groupID",
+											"type": "Expression"
+										},
+										"type": "Int32"
+									},
+									"OBJECT_ID": {
+										"value": {
+											"value": "@item().OBJECT_ID",
+											"type": "Expression"
+										},
+										"type": "Int32"
+									},
+									"OBJECT_NAME": {
+										"value": {
+											"value": "@item().OBJECT_NAME",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"PIPELINE_NAME": {
+										"value": {
+											"value": "@pipeline().Pipeline",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"RUN_ID": {
+										"value": {
+											"value": "@pipeline().RunId",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"SRC_EXTRACT_TYPE": {
+										"value": {
+											"value": "@item().SRC_EXTRACT_TYPE",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"SRC_REC_COUNT": {
+										"value": null,
+										"type": "String"
+									},
+									"StatementType": {
+										"value": "Insert",
+										"type": "String"
+									},
+									"TGT_LOAD_TYPE": {
+										"value": {
+											"value": "@item().TGT_LOAD_OPTION",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"TGT_REC_COUNT": {
+										"value": null,
+										"type": "String"
+									},
+									"TRIGGER_ID": {
+										"value": {
+											"value": "@pipeline().TriggerId",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"TRIGGER_NAME": {
+										"value": {
+											"value": "@pipeline().TriggerName",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"TRIGGER_TYPE": {
+										"value": {
+											"value": "@pipeline().TriggerType",
+											"type": "Expression"
+										},
+										"type": "String"
+									}
+								}
+							},
+							"linkedServiceName": {
+								"referenceName": "SQLServerMetadataDB",
+								"type": "LinkedServiceReference"
+							}
+						},
+						{
+							"name": "Success Of Step",
+							"type": "SqlServerStoredProcedure",
+							"dependsOn": [
+								{
+									"activity": "If Condition For Full or INCR Load",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"storedProcedureName": "[dbo].[DATA_FACTORY_PIPELINE_EXEC_LOG_SP]",
+								"storedProcedureParameters": {
+									"EXEC_START_TIME": {
+										"value": null,
+										"type": "DateTime"
+									},
+									"EXEC_STATUS": {
+										"value": "SUCCESS",
+										"type": "String"
+									},
+									"GROUP_ID": {
+										"value": {
+											"value": "@pipeline().parameters.groupID",
+											"type": "Expression"
+										},
+										"type": "Int32"
+									},
+									"OBJECT_ID": {
+										"value": {
+											"value": "@item().OBJECT_ID",
+											"type": "Expression"
+										},
+										"type": "Int32"
+									},
+									"OBJECT_NAME": {
+										"value": null,
+										"type": "String"
+									},
+									"PIPELINE_NAME": {
+										"value": null,
+										"type": "String"
+									},
+									"RUN_ID": {
+										"value": {
+											"value": "@pipeline().RunId",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"SRC_EXTRACT_TYPE": {
+										"value": null,
+										"type": "String"
+									},
+									"SRC_REC_COUNT": {
+										"value": null,
+										"type": "String"
+									},
+									"StatementType": {
+										"value": "UpdateStatus",
+										"type": "String"
+									},
+									"TGT_LOAD_TYPE": {
+										"value": null,
+										"type": "String"
+									},
+									"TGT_REC_COUNT": {
+										"value": null,
+										"type": "String"
+									},
+									"TRIGGER_ID": {
+										"value": null,
+										"type": "String"
+									},
+									"TRIGGER_NAME": {
+										"value": null,
+										"type": "String"
+									},
+									"TRIGGER_TYPE": {
+										"value": null,
+										"type": "String"
+									}
+								}
+							},
+							"linkedServiceName": {
+								"referenceName": "SQLServerMetadataDB",
+								"type": "LinkedServiceReference"
+							}
+						},
+						{
+							"name": "Failure Of Step",
+							"type": "SqlServerStoredProcedure",
+							"dependsOn": [
+								{
+									"activity": "If Condition For Full or INCR Load",
+									"dependencyConditions": [
+										"Failed"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"storedProcedureName": "[dbo].[DATA_FACTORY_PIPELINE_EXEC_LOG_SP]",
+								"storedProcedureParameters": {
+									"EXEC_START_TIME": {
+										"value": null,
+										"type": "DateTime"
+									},
+									"EXEC_STATUS": {
+										"value": "FAILED",
+										"type": "String"
+									},
+									"GROUP_ID": {
+										"value": {
+											"value": "@pipeline().parameters.groupID",
+											"type": "Expression"
+										},
+										"type": "Int32"
+									},
+									"OBJECT_ID": {
+										"value": {
+											"value": "@item().OBJECT_ID",
+											"type": "Expression"
+										},
+										"type": "Int32"
+									},
+									"OBJECT_NAME": {
+										"value": null,
+										"type": "String"
+									},
+									"PIPELINE_NAME": {
+										"value": null,
+										"type": "String"
+									},
+									"RUN_ID": {
+										"value": {
+											"value": "@pipeline().RunId",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"SRC_EXTRACT_TYPE": {
+										"value": null,
+										"type": "String"
+									},
+									"SRC_REC_COUNT": {
+										"value": null,
+										"type": "String"
+									},
+									"StatementType": {
+										"value": "UpdateStatus",
+										"type": "String"
+									},
+									"TGT_LOAD_TYPE": {
+										"value": null,
+										"type": "String"
+									},
+									"TGT_REC_COUNT": {
+										"value": null,
+										"type": "String"
+									},
+									"TRIGGER_ID": {
+										"value": null,
+										"type": "String"
+									},
+									"TRIGGER_NAME": {
+										"value": null,
+										"type": "String"
+									},
+									"TRIGGER_TYPE": {
+										"value": null,
+										"type": "String"
+									}
+								}
+							},
+							"linkedServiceName": {
+								"referenceName": "SQLServerMetadataDB",
+								"type": "LinkedServiceReference"
+							}
+						}
+					]
+				}
+			}
+		],
+		"concurrency": 50,
+		"parameters": {
+			"groupID": {
+				"type": "String",
+				"defaultValue": "4"
+			}
+		},
+		"variables": {
+			"SelectQuery": {
+				"type": "String"
+			}
+		},
+		"annotations": [],
+		"lastPublishTime": "2020-08-19T11:26:36Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}
